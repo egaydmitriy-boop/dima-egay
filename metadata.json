@@ -1,0 +1,6 @@
+{
+  "name": "MossNode AI",
+  "description": "Командная Kanban-доска, карта зависимостей, календарь дедлайнов, общий ИИ-чат и голосовой разбор задач для запуска сервера локальных ИИ.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

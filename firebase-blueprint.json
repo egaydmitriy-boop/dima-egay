@@ -1,0 +1,143 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private authenticated profile of a team member.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "email", "role", "createdAt", "updatedAt"]
+    },
+    "Workspace": {
+      "title": "Workspace",
+      "description": "Shared team workspace for building the local AI server.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "mission": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "name", "mission", "memberUids", "createdAt", "updatedAt"]
+    },
+    "TeamMember": {
+      "title": "TeamMember",
+      "description": "Team member role slot within the workspace for task assignment.",
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "linkedUid": { "type": "string" },
+        "name": { "type": "string" },
+        "specialty": { "type": "string" },
+        "avatarHex": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["workspaceId", "createdByUid", "linkedUid", "name", "specialty", "avatarHex", "memberUids", "createdAt", "updatedAt"]
+    },
+    "KanbanTask": {
+      "title": "KanbanTask",
+      "description": "Kanban board task with deadline, assignee, department, and dependency links.",
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "department": { "type": "string" },
+        "status": { "type": "string", "enum": ["TODO", "IN_PROGRESS", "TESTING", "DONE"] },
+        "priority": { "type": "string", "enum": ["CRITICAL", "HIGH", "NORMAL"] },
+        "assigneeId": { "type": "string" },
+        "assigneeName": { "type": "string" },
+        "dueDateIso": { "type": "string" },
+        "dueTimeText": { "type": "string" },
+        "estimatedHours": { "type": "integer" },
+        "blockedByTaskIds": { "type": "array" },
+        "sourceType": { "type": "string", "enum": ["MANUAL", "VOICE_AI", "SEED"] },
+        "memberUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "workspaceId",
+        "authorUid",
+        "title",
+        "description",
+        "department",
+        "status",
+        "priority",
+        "assigneeId",
+        "assigneeName",
+        "dueDateIso",
+        "dueTimeText",
+        "estimatedHours",
+        "blockedByTaskIds",
+        "sourceType",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TeamChatMessage": {
+      "title": "TeamChatMessage",
+      "description": "Shared team AI chat message including YouTube link analysis and voice task logs.",
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "role": { "type": "string", "enum": ["USER", "AI", "VOICE_LOG"] },
+        "text": { "type": "string" },
+        "youtubeUrl": { "type": "string" },
+        "linkedTaskIds": { "type": "array" },
+        "memberUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "workspaceId",
+        "senderUid",
+        "senderName",
+        "role",
+        "text",
+        "youtubeUrl",
+        "linkedTaskIds",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profiles isolated by userId."
+    },
+    "/workspaces/{workspaceId}": {
+      "schema": { "$ref": "#/entities/Workspace" },
+      "description": "Shared team workspaces scoped by memberUids."
+    },
+    "/workspaces/{workspaceId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/TeamMember" },
+      "description": "Team roster slots inside a workspace."
+    },
+    "/workspaces/{workspaceId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/KanbanTask" },
+      "description": "Shared Kanban tasks, deadlines, and dependency links."
+    },
+    "/workspaces/{workspaceId}/chat_messages/{messageId}": {
+      "schema": { "$ref": "#/entities/TeamChatMessage" },
+      "description": "Shared team chat history with the Gemini AI server mentor."
+    }
+  }
+}

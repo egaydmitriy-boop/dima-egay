@@ -1,0 +1,244 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    function isValidMemberUids(uids) {
+      return uids is list && uids.size() >= 1 && uids.size() <= 20 && uids[0] is string;
+    }
+
+    function isWorkspaceMember(workspaceId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/workspaces/$(workspaceId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.memberUids;
+    }
+
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+        data.email is string && data.email.size() <= 120 &&
+        data.role is string && data.role.size() >= 1 && data.role.size() <= 60 &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidWorkspace(data) {
+      return data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+        data.mission is string && data.mission.size() >= 2 && data.mission.size() <= 400 &&
+        isValidMemberUids(data.memberUids) &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidTeamMember(data) {
+      return data.workspaceId is string && isValidId(data.workspaceId) &&
+        data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128 &&
+        data.linkedUid is string && data.linkedUid.size() <= 128 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 50 &&
+        data.specialty is string && data.specialty.size() >= 1 && data.specialty.size() <= 80 &&
+        data.avatarHex is string && data.avatarHex.size() >= 4 && data.avatarHex.size() <= 12 &&
+        isValidMemberUids(data.memberUids) &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidTask(data) {
+      return data.workspaceId is string && isValidId(data.workspaceId) &&
+        data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.description is string && data.description.size() <= 1000 &&
+        data.department is string && data.department.size() >= 1 && data.department.size() <= 40 &&
+        data.status in ['TODO', 'IN_PROGRESS', 'TESTING', 'DONE'] &&
+        data.priority in ['CRITICAL', 'HIGH', 'NORMAL'] &&
+        data.assigneeId is string && data.assigneeId.size() <= 64 &&
+        data.assigneeName is string && data.assigneeName.size() <= 60 &&
+        data.dueDateIso is string && data.dueDateIso.size() == 10 &&
+        data.dueTimeText is string && data.dueTimeText.size() <= 16 &&
+        data.estimatedHours is int && data.estimatedHours >= 1 && data.estimatedHours <= 500 &&
+        data.blockedByTaskIds is list && data.blockedByTaskIds.size() <= 10 &&
+        (data.blockedByTaskIds.size() == 0 || data.blockedByTaskIds[0] is string) &&
+        data.sourceType in ['MANUAL', 'VOICE_AI', 'SEED'] &&
+        isValidMemberUids(data.memberUids) &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidChatMessage(data) {
+      return data.workspaceId is string && isValidId(data.workspaceId) &&
+        data.senderUid is string && data.senderUid.size() >= 1 && data.senderUid.size() <= 128 &&
+        data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+        data.role in ['USER', 'AI', 'VOICE_LOG'] &&
+        data.text is string && data.text.size() >= 1 && data.text.size() <= 8000 &&
+        data.youtubeUrl is string && data.youtubeUrl.size() <= 300 &&
+        data.linkedTaskIds is list && data.linkedTaskIds.size() <= 10 &&
+        (data.linkedTaskIds.size() == 0 || data.linkedTaskIds[0] is string) &&
+        isValidMemberUids(data.memberUids) &&
+        isValidTimestamp(data.createdAt) &&
+        isValidTimestamp(data.updatedAt);
+    }
+
+    match /users/{userId} {
+      allow list: if isSignedIn() && request.auth.uid == userId;
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+        isValidId(userId) &&
+        request.auth.uid == userId &&
+        isValidUserProfile(incoming()) &&
+        incoming().userId == request.auth.uid &&
+        incoming().keys().hasAll(['userId', 'displayName', 'email', 'role', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['userId', 'displayName', 'email', 'role', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() &&
+        isValidId(userId) &&
+        request.auth.uid == userId &&
+        isValidUserProfile(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'role', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    match /workspaces/{workspaceId} {
+      allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+      allow get: if isSignedIn() && isValidId(workspaceId) && request.auth.uid in resource.data.memberUids;
+
+      allow create: if isSignedIn() &&
+        isValidId(workspaceId) &&
+        isValidWorkspace(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberUids &&
+        incoming().memberUids.size() == 1 &&
+        incoming().keys().hasAll(['ownerId', 'name', 'mission', 'memberUids', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['ownerId', 'name', 'mission', 'memberUids', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() &&
+        isValidId(workspaceId) &&
+        isValidWorkspace(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          (
+            request.auth.uid in existing().memberUids &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'mission', 'updatedAt'])
+          ) || (
+            !(request.auth.uid in existing().memberUids) &&
+            existing().memberUids.size() < 20 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']) &&
+            incoming().memberUids.hasAll(existing().memberUids) &&
+            incoming().memberUids.size() == existing().memberUids.size() + 1 &&
+            request.auth.uid in incoming().memberUids
+          )
+        );
+
+      allow delete: if isSignedIn() && isValidId(workspaceId) && resource.data.ownerId == request.auth.uid;
+
+      match /members/{memberId} {
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow get: if isSignedIn() && isValidId(memberId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+          isValidId(memberId) &&
+          isValidTeamMember(incoming()) &&
+          incoming().workspaceId == workspaceId &&
+          incoming().createdByUid == request.auth.uid &&
+          request.auth.uid in incoming().memberUids &&
+          isWorkspaceMember(workspaceId) &&
+          incoming().keys().hasAll(['workspaceId', 'createdByUid', 'linkedUid', 'name', 'specialty', 'avatarHex', 'memberUids', 'createdAt', 'updatedAt']) &&
+          incoming().keys().hasOnly(['workspaceId', 'createdByUid', 'linkedUid', 'name', 'specialty', 'avatarHex', 'memberUids', 'createdAt', 'updatedAt']);
+
+        allow update: if isSignedIn() &&
+          isValidId(memberId) &&
+          isValidTeamMember(incoming()) &&
+          incoming().workspaceId == existing().workspaceId &&
+          incoming().createdByUid == existing().createdByUid &&
+          incoming().createdAt == existing().createdAt &&
+          request.auth.uid in existing().memberUids &&
+          request.auth.uid in incoming().memberUids &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['linkedUid', 'name', 'specialty', 'avatarHex', 'memberUids', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(memberId) && request.auth.uid in resource.data.memberUids;
+      }
+
+      match /tasks/{taskId} {
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow get: if isSignedIn() && isValidId(taskId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+          isValidId(taskId) &&
+          isValidTask(incoming()) &&
+          incoming().workspaceId == workspaceId &&
+          incoming().authorUid == request.auth.uid &&
+          request.auth.uid in incoming().memberUids &&
+          isWorkspaceMember(workspaceId) &&
+          incoming().keys().hasAll(['workspaceId', 'authorUid', 'title', 'description', 'department', 'status', 'priority', 'assigneeId', 'assigneeName', 'dueDateIso', 'dueTimeText', 'estimatedHours', 'blockedByTaskIds', 'sourceType', 'memberUids', 'createdAt', 'updatedAt']) &&
+          incoming().keys().hasOnly(['workspaceId', 'authorUid', 'title', 'description', 'department', 'status', 'priority', 'assigneeId', 'assigneeName', 'dueDateIso', 'dueTimeText', 'estimatedHours', 'blockedByTaskIds', 'sourceType', 'memberUids', 'createdAt', 'updatedAt']);
+
+        allow update: if isSignedIn() &&
+          isValidId(taskId) &&
+          isValidTask(incoming()) &&
+          incoming().workspaceId == existing().workspaceId &&
+          incoming().authorUid == existing().authorUid &&
+          incoming().createdAt == existing().createdAt &&
+          request.auth.uid in existing().memberUids &&
+          request.auth.uid in incoming().memberUids &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'department', 'status', 'priority', 'assigneeId', 'assigneeName', 'dueDateIso', 'dueTimeText', 'estimatedHours', 'blockedByTaskIds', 'memberUids', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(taskId) && request.auth.uid in resource.data.memberUids;
+      }
+
+      match /chat_messages/{messageId} {
+        allow list: if isSignedIn() && request.auth.uid in resource.data.memberUids;
+        allow get: if isSignedIn() && isValidId(messageId) && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isSignedIn() &&
+          isValidId(messageId) &&
+          isValidChatMessage(incoming()) &&
+          incoming().workspaceId == workspaceId &&
+          incoming().senderUid == request.auth.uid &&
+          request.auth.uid in incoming().memberUids &&
+          isWorkspaceMember(workspaceId) &&
+          incoming().keys().hasAll(['workspaceId', 'senderUid', 'senderName', 'role', 'text', 'youtubeUrl', 'linkedTaskIds', 'memberUids', 'createdAt', 'updatedAt']) &&
+          incoming().keys().hasOnly(['workspaceId', 'senderUid', 'senderName', 'role', 'text', 'youtubeUrl', 'linkedTaskIds', 'memberUids', 'createdAt', 'updatedAt']);
+
+        allow update: if isSignedIn() &&
+          isValidId(messageId) &&
+          isValidChatMessage(incoming()) &&
+          incoming().workspaceId == existing().workspaceId &&
+          incoming().senderUid == existing().senderUid &&
+          incoming().role == existing().role &&
+          incoming().createdAt == existing().createdAt &&
+          request.auth.uid in existing().memberUids &&
+          request.auth.uid in incoming().memberUids &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']);
+
+        allow delete: if isSignedIn() && isValidId(messageId) && resource.data.senderUid == request.auth.uid;
+      }
+    }
+  }
+}
