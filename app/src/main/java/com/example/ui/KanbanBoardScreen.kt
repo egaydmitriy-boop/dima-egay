@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.GroupAdd
 import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.ViewColumn
@@ -87,7 +88,8 @@ fun KanbanBoardScreen(
     onCreateTask: () -> Unit,
     onEditTask: (KanbanTask) -> Unit,
     onMoveStatus: (KanbanTask, TaskStatus) -> Unit,
-    onAddMemberClick: () -> Unit
+    onAddMemberClick: () -> Unit,
+    onOpenVoiceInput: () -> Unit
 ) {
     var showDependencyGraph by remember { mutableStateOf(false) }
 
@@ -132,6 +134,22 @@ fun KanbanBoardScreen(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Surface(
+                            color = MossLime,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onOpenVoiceInput() }
+                                .testTag("kanban_voice_button")
+                        ) {
+                            Box(
+                                modifier = Modifier.size(48.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Rounded.Mic, contentDescription = "Голосовая задача ИИ", tint = MossInk)
+                            }
+                        }
+
+                        Surface(
                             color = MossWhite,
                             shape = RoundedCornerShape(10.dp),
                             border = androidx.compose.foundation.BorderStroke(1.dp, MossLine),
@@ -141,7 +159,7 @@ fun KanbanBoardScreen(
                                 .testTag("add_member_button")
                         ) {
                             Box(
-                                modifier = Modifier.size(44.dp),
+                                modifier = Modifier.size(48.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Rounded.GroupAdd, contentDescription = "Участники", tint = MossInk)
@@ -157,7 +175,7 @@ fun KanbanBoardScreen(
                                 .testTag("create_task_button")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {

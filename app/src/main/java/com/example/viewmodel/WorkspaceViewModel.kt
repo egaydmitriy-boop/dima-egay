@@ -17,6 +17,7 @@ import com.example.model.TeamMember
 import com.example.model.Workspace
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,11 +38,23 @@ sealed interface DataUiState<out T> {
     data class Error(val message: String) : DataUiState<Nothing>
 }
 
+data class VoiceCreatedTaskSummary(
+    val title: String,
+    val department: String,
+    val assigneeName: String,
+    val dueDateIso: String,
+    val dueTimeText: String
+)
+
 sealed interface VoiceProcessState {
     data object Idle : VoiceProcessState
     data object Recording : VoiceProcessState
     data object Analyzing : VoiceProcessState
-    data class Done(val summary: String, val addedTitles: List<String>) : VoiceProcessState
+    data class Done(
+        val summary: String,
+        val addedTitles: List<String>,
+        val createdTasks: List<VoiceCreatedTaskSummary> = emptyList()
+    ) : VoiceProcessState
     data class Error(val message: String) : VoiceProcessState
 }
 
@@ -384,6 +397,11 @@ class WorkspaceViewModel(
                     youtubeUrl = ytUrl
                 )
                 _chatStreamState.value = ChatStreamState.Idle
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Gemini chat timed out", e)
+                _chatStreamState.value = ChatStreamState.Error(
+                    "ИИ не успел ответить за 60 секунд. Попробуйте повторить запрос."
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -399,11 +417,19 @@ class WorkspaceViewModel(
         _voiceState.value = VoiceProcessState.Recording
     }
 
+    fun setVoiceErrorState(message: String) {
+        _voiceState.value = VoiceProcessState.Error(message)
+    }
+
     fun resetVoiceState() {
         _voiceState.value = VoiceProcessState.Idle
     }
 
     fun processVoicePayload(audioBytes: ByteArray?, fallbackText: String?) {
+        if ((audioBytes == null || audioBytes.isEmpty()) && fallbackText.isNullOrBlank()) {
+            _voiceState.value = VoiceProcessState.Error("Нет аудиозаписи или текста для разбора.")
+            return
+        }
         viewModelScope.launch {
             _voiceState.value = VoiceProcessState.Analyzing
             try {
@@ -415,9 +441,19 @@ class WorkspaceViewModel(
                     members = members,
                     existingTasks = existingTasks
                 )
+                if (parsed.tasks.isEmpty()) {
+                    _voiceState.value = VoiceProcessState.Error(
+                        "Не удалось выделить задачи из записи. Попробуйте чётче назвать задачу и срок."
+                    )
+                    return@launch
+                }
+
                 val memberUids = currentMemberUids()
                 val createdIds = mutableListOf<String>()
                 val createdTitles = mutableListOf<String>()
+                val createdSummaries = mutableListOf<VoiceCreatedTaskSummary>()
+                val batchTaskIdsByTitle = mutableListOf<Pair<String, String>>()
+                var lastFailure: Throwable? = null
 
                 for (item in parsed.tasks) {
                     val matchedMember = members.firstOrNull { m ->
@@ -425,10 +461,16 @@ class WorkspaceViewModel(
                             (m.name.contains(item.assigneeName, ignoreCase = true) ||
                                 item.assigneeName.contains(m.name.substringBefore(" "), ignoreCase = true))
                     }
-                    val matchedBlocker = existingTasks.firstOrNull { t ->
+                    val matchedExistingBlockerId = existingTasks.firstOrNull { t ->
                         item.dependsOnTaskTitle.isNotBlank() &&
                             t.title.contains(item.dependsOnTaskTitle.take(18), ignoreCase = true)
-                    }
+                    }?.id
+                    val matchedBatchBlockerId = batchTaskIdsByTitle.firstOrNull { (title, _) ->
+                        item.dependsOnTaskTitle.isNotBlank() &&
+                            title.contains(item.dependsOnTaskTitle.take(18), ignoreCase = true)
+                    }?.second
+
+                    val resolvedAssignee = matchedMember?.name ?: item.assigneeName
                     val priority = TaskPriority.fromRaw(item.priority)
                     val res = teamRepository.createTask(
                         workspaceId = DEFAULT_WORKSPACE_ID,
@@ -439,34 +481,61 @@ class WorkspaceViewModel(
                         status = TaskStatus.TODO,
                         priority = priority,
                         assigneeId = matchedMember?.id.orEmpty(),
-                        assigneeName = matchedMember?.name ?: item.assigneeName,
+                        assigneeName = resolvedAssignee,
                         dueDateIso = item.dueDateIso,
                         dueTimeText = item.dueTimeText,
                         estimatedHours = item.estimatedHours,
-                        blockedByTaskIds = listOfNotNull(matchedBlocker?.id),
+                        blockedByTaskIds = listOfNotNull(matchedExistingBlockerId ?: matchedBatchBlockerId),
                         sourceType = "VOICE_AI"
                     )
-                    res.onSuccess { id ->
-                        createdIds.add(id)
-                        createdTitles.add("${item.title} (${item.dueDateIso})")
-                    }
-                }
-
-                if (createdIds.isNotEmpty()) {
-                    teamRepository.postChatMessage(
-                        workspaceId = DEFAULT_WORKSPACE_ID,
-                        memberUids = memberUids,
-                        senderName = currentUserName,
-                        role = "VOICE_LOG",
-                        text = "Голосовой разбор (${parsed.transcriptSummary}) -> добавлено в календарь и Kanban:\n" +
-                            createdTitles.joinToString("\n") { "• $it" },
-                        linkedTaskIds = createdIds
+                    res.fold(
+                        onSuccess = { id ->
+                            createdIds.add(id)
+                            batchTaskIdsByTitle.add(item.title to id)
+                            createdTitles.add("${item.title} (${item.dueDateIso})")
+                            createdSummaries.add(
+                                VoiceCreatedTaskSummary(
+                                    title = item.title,
+                                    department = item.department,
+                                    assigneeName = resolvedAssignee.ifBlank { "Команда" },
+                                    dueDateIso = item.dueDateIso,
+                                    dueTimeText = item.dueTimeText
+                                )
+                            )
+                        },
+                        onFailure = { err ->
+                            lastFailure = err
+                        }
                     )
                 }
 
+                if (createdIds.isEmpty()) {
+                    _voiceState.value = VoiceProcessState.Error(
+                        lastFailure?.localizedMessage ?: "Не удалось сохранить задачи в Firestore."
+                    )
+                    return@launch
+                }
+
+                teamRepository.postChatMessage(
+                    workspaceId = DEFAULT_WORKSPACE_ID,
+                    memberUids = memberUids,
+                    senderName = currentUserName,
+                    role = "VOICE_LOG",
+                    text = "Голосовой разбор (${parsed.transcriptSummary}) -> добавлено в календарь и Kanban:\n" +
+                        createdTitles.joinToString("\n") { "• $it" },
+                    linkedTaskIds = createdIds
+                )
+
+                _actionNotice.value = "Добавлено задач: ${createdIds.size} (Kanban + Календарь)"
                 _voiceState.value = VoiceProcessState.Done(
                     summary = parsed.transcriptSummary,
-                    addedTitles = createdTitles
+                    addedTitles = createdTitles,
+                    createdTasks = createdSummaries
+                )
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Voice AI processing timed out", e)
+                _voiceState.value = VoiceProcessState.Error(
+                    "Gemini не успел обработать запись за 60 секунд. Попробуйте снова."
                 )
             } catch (e: CancellationException) {
                 throw e

@@ -11,6 +11,7 @@ private const val TAG = "VoiceRecorderManager"
 class VoiceRecorderManager(private val context: Context) {
     private var recorder: MediaRecorder? = null
     private var outputFile: File? = null
+    private var startedAtMs: Long = 0L
 
     fun startRecording(): Result<File> {
         return try {
@@ -33,6 +34,7 @@ class VoiceRecorderManager(private val context: Context) {
                 prepare()
                 start()
             }
+            startedAtMs = System.currentTimeMillis()
             recorder = mr
             Result.success(file)
         } catch (e: Exception) {
@@ -42,18 +44,36 @@ class VoiceRecorderManager(private val context: Context) {
         }
     }
 
+    fun getAmplitudeNormalized(): Float {
+        return try {
+            val amp = recorder?.maxAmplitude ?: 0
+            (amp / 18000f).coerceIn(0.08f, 1f)
+        } catch (_: Exception) {
+            0.08f
+        }
+    }
+
     fun stopAndReadBytes(): Result<ByteArray> {
         return try {
-            val file = outputFile ?: return Result.failure(IllegalStateException("Нет активной записи"))
+            val file = outputFile ?: return Result.failure(IllegalStateException("Нет активной записи."))
+            val elapsedMs = System.currentTimeMillis() - startedAtMs
             try {
                 recorder?.stop()
             } catch (e: RuntimeException) {
                 Log.w(TAG, "Recorder stop runtime exception (too short?)", e)
+                stopAndDiscard()
+                return Result.failure(
+                    IllegalStateException("Запись слишком короткая. Говорите хотя бы 1 секунду.")
+                )
             }
             recorder?.release()
             recorder = null
-            if (!file.exists() || file.length() == 0L) {
-                return Result.failure(IllegalStateException("Аудиофайл пуст. Попробуйте говорить чуть дольше."))
+            if (elapsedMs < 350L || !file.exists() || file.length() == 0L) {
+                file.delete()
+                outputFile = null
+                return Result.failure(
+                    IllegalStateException("Запись пустая или слишком короткая. Попробуйте говорить чуть дольше.")
+                )
             }
             val bytes = file.readBytes()
             file.delete()
@@ -76,6 +96,7 @@ class VoiceRecorderManager(private val context: Context) {
         } catch (_: Exception) {
         }
         recorder = null
+        startedAtMs = 0L
         outputFile?.delete()
         outputFile = null
     }

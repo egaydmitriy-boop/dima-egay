@@ -206,9 +206,15 @@ fun MainWorkspaceScreen(
                 VoiceHotkeyFab(
                     voiceState = voiceState,
                     showDialog = showVoiceDialog,
+                    showOpenKanbanAction = currentRoute != ROUTE_KANBAN,
                     onOpenDialog = { showVoiceDialog = true },
                     onDismissDialog = { showVoiceDialog = false },
+                    onOpenKanban = {
+                        showVoiceDialog = false
+                        navigateToTab(ROUTE_KANBAN)
+                    },
                     onStartRecordingState = { viewModel.setVoiceRecordingState() },
+                    onVoiceErrorState = { msg -> viewModel.setVoiceErrorState(msg) },
                     onResetVoiceState = { viewModel.resetVoiceState() },
                     onSubmitAudio = { bytes, txt -> viewModel.processVoicePayload(bytes, txt) }
                 )
@@ -325,7 +331,11 @@ fun MainWorkspaceScreen(
                                             showTaskDialog = true
                                         },
                                         onMoveStatus = { task, newSt -> viewModel.moveTaskStatus(task, newSt) },
-                                        onAddMemberClick = { showMemberDialog = true }
+                                        onAddMemberClick = { showMemberDialog = true },
+                                        onOpenVoiceInput = {
+                                            viewModel.resetVoiceState()
+                                            showVoiceDialog = true
+                                        }
                                     )
                                 }
                             }
